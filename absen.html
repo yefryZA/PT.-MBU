@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Absensi PT. MBU - Secure Mode</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #e0f2fe; margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { background: white; width: 90%; max-width: 400px; padding: 25px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; }
+        h2 { color: #0369a1; margin-bottom: 20px; }
+        .camera-box { width: 100%; height: 250px; background: #f1f5f9; border-radius: 15px; margin-bottom: 15px; border: 3px solid #0ea5e9; overflow: hidden; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .input-group { text-align: left; margin-bottom: 12px; }
+        label { display: block; font-size: 13px; font-weight: bold; margin-bottom: 5px; color: #475569; }
+        select, input { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #cbd5e1; box-sizing: border-box; }
+        .btn-absen { background: #0284c7; color: white; border: none; width: 100%; padding: 15px; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .btn-absen:disabled { background: #94a3b8; }
+        #status-msg { margin-top: 15px; padding: 10px; border-radius: 8px; display: none; font-weight: bold; }
+        .success { background: #dcfce7; color: #166534; display: block !important; }
+        .error { background: #fee2e2; color: #991b1b; display: block !important; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>PT. MBU Absensi</h2>
+    <div class="camera-box"><video id="video" autoplay playsinline></video></div>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <div class="input-group">
+        <label>Nama Karyawan</label>
+        <select id="nama-karyawan">
+            <option value="">-- Pilih Nama --</option>
+            <option value="Yefry">Yefry</option>
+            <option value="Hasan">Hasan</option>
+        </select>
+    </div>
+
+    <div class="input-group">
+        <label>Tipe Absen</label>
+        <select id="tipe-absen">
+            <option value="MASUK">ABSEN MASUK</option>
+            <option value="PULANG">ABSEN PULANG</option>
+        </select>
+    </div>
+
+    <div class="input-group">
+        <label>Password Khusus</label>
+        <input type="password" id="pass-karyawan" placeholder="Sandi 4 digit" maxlength="4">
+    </div>
+
+    <div class="input-group">
+        <label>Role</label>
+        <select id="role" onchange="toggleStatusTugas()">
+            <option value="Staff">Staff Kantor</option>
+            <option value="Sopir">Sopir Lapangan</option>
+        </select>
+    </div>
+
+    <div id="group-status-tugas" class="input-group" style="display:none;">
+        <label>Status Tugas</label>
+        <select id="status-tugas">
+            <option value="STANDBY">STANDBY</option>
+            <option value="OTW">OTW (DI JALAN)</option>
+        </select>
+    </div>
+
+    <button class="btn-absen" id="btn-submit">ABSEN SEKARANG</button>
+    <div id="status-msg"></div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyB8kpAMYAg1tC_8AuiQo3N2ecdrd4XbfuQ",
+        authDomain: "pt-mbu.firebaseapp.com",
+        projectId: "pt-mbu",
+        storageBucket: "pt-mbu.firebasestorage.app",
+        messagingSenderId: "338793529445",
+        appId: "1:338793529445:web:e352eaef94d282c5ba468c"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app, "https://pt-mbu-default-rtdb.asia-southeast1.firebasedatabase.app/");
+
+    // 1. DATA PASSWORD (Abang bisa ganti di sini)
+    const dataPassword = {
+        "Yefry": "1234",
+        "Hasan": "2026"
+    };
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const btnSubmit = document.getElementById('btn-submit');
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
+        .then(s => video.srcObject = s).catch(e => alert("Kamera Error"));
+
+    window.toggleStatusTugas = () => {
+        const r = document.getElementById('role').value;
+        document.getElementById('group-status-tugas').style.display = (r === 'Sopir') ? 'block' : 'none';
+    };
+
+    function hitungJarak(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    btnSubmit.onclick = async () => {
+        const nama = document.getElementById('nama-karyawan').value;
+        const pass = document.getElementById('pass-karyawan').value;
+        const tipe = document.getElementById('tipe-absen').value;
+        const role = document.getElementById('role').value;
+        const st = document.getElementById('status-tugas').value;
+        const msg = document.getElementById('status-msg');
+
+        if(!nama || !pass) return alert("Isi Nama & Password, Bang!");
+        
+        // CEK PASSWORD
+        if(pass !== dataPassword[nama]) return alert("Password Salah!");
+
+        btnSubmit.disabled = true;
+        btnSubmit.innerText = "Cek Lokasi...";
+
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            const uLat = pos.coords.latitude;
+            const uLon = pos.coords.longitude;
+            let boleh = false; let lokNama = "Luar Jangkauan";
+
+            // Cek Geofence (Kantor 1 & 2)
+            const kantor = [{n:"K1", la:-5.963287, lo:106.001753}, {n:"K2", la:-5.959374, lo:105.999700}];
+            kantor.forEach(k => { if(hitungJarak(uLat, uLon, k.la, k.lo) <= 150) { boleh = true; lokNama = k.n; } });
+            if(role === 'Sopir' && st === 'OTW') { boleh = true; lokNama = "OTW JALAN"; }
+
+            if(!boleh) {
+                msg.innerText = "Gagal: Lokasi tidak sesuai!"; msg.className = "error";
+                btnSubmit.disabled = false; btnSubmit.innerText = "ABSEN SEKARANG"; return;
+            }
+
+            btnSubmit.innerText = "Kirim Data...";
+            const ctx = canvas.getContext('2d'); canvas.width = 400; canvas.height = 300;
+            ctx.drawImage(video, 0, 0, 400, 300);
+            const foto = canvas.toDataURL('image/jpeg', 0.5);
+
+            const tgl = new Date().toISOString().split('T')[0];
+            const jam = new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'});
+
+            await set(ref(db, `pt_mbu/absensi/${tgl}/${nama}/${tipe}`), {
+                nama, role, tipe, jam, lokasi: lokNama, foto, timestamp: Date.now()
+            });
+
+            msg.innerText = `Berhasil ${tipe}!`; msg.className = "success";
+            btnSubmit.innerText = "SUKSES ✅";
+        }, (e) => { alert("GPS Mati!"); btnSubmit.disabled = false; }, {enableHighAccuracy:true});
+    };
+</script>
+</body>
+</html>

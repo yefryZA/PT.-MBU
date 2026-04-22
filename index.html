@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard HRD - PT. MBU</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f0f4f8; margin: 20px; }
+        .header-box { background: #0284c7; color: white; padding: 20px; border-radius: 15px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .controls { display: flex; gap: 10px; align-items: center; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+        th { background: #0ea5e9; color: white; }
+        .btn-pdf { background: #e11d48; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px; }
+        .btn-pdf:hover { background: #be123c; }
+        .lembur { color: #dc2626; font-weight: bold; }
+        .foto-mini { width: 45px; height: 45px; border-radius: 5px; cursor: pointer; object-fit: cover; border: 1px solid #ddd; }
+    
+    .header-box { 
+    background: #0284c7; 
+    color: white; 
+    padding: 15px 20px; 
+    border-radius: 15px; 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    margin-bottom: 20px; 
+}
+
+.controls { 
+    display: flex; 
+    gap: 15px; 
+    align-items: center; 
+    background: rgba(255,255,255,0.1); 
+    padding: 10px; 
+    border-radius: 10px; 
+}
+
+.btn-pdf { 
+    font-size: 13px; /* Kecilin dikit biar muat banyak */
+    white-space: nowrap; /* Biar tulisan tombol gak turun ke bawah */
+}
+    </style>
+</head>
+<body>
+
+<div class="header-box">
+    <div>
+        <h1 style="margin:0;">Laporan PT. MBU</h1>
+        <p id="label-tgl" style="margin:5px 0 0 0; opacity:0.9; font-size: 13px;"></p>
+    </div>
+    
+    <div class="controls">
+        <div style="display:flex; align-items:center; gap:5px; border-right: 1px solid rgba(255,255,255,0.3); padding-right:10px;">
+            <input type="date" id="pilih-tanggal" style="padding:8px; border-radius:5px; border:none; font-weight: bold;">
+            <button class="btn-pdf" onclick="downloadPDF()">📄 Harian</button>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:5px;">
+            <input type="month" id="pilih-bulan" style="padding:8px; border-radius:5px; border:none; font-weight: bold;">
+            <button class="btn-pdf" style="background:#059669;" onclick="generateBulanan()">📅 Rekap & Reset</button>
+        </div>
+    </div>
+</div>
+
+<table id="tabel-rekap">
+    <thead>
+        <tr>
+            <th>Nama</th>
+            <th>Role</th>
+            <th>Masuk</th>
+            <th>Pulang</th>
+            <th>Total Jam</th>
+            <th>Lembur</th>
+            <th>Lokasi</th>
+            <th>Foto</th>
+        </tr>
+    </thead>
+    <tbody id="isi-tabel">
+        </tbody>
+</table>
+
+<script type="module">
+    // 1. IMPORT FIREBASE (Ditambah fungsi 'remove')
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getDatabase, ref, onValue, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyB8kpAMYAg1tC_8AuiQo3N2ecdrd4XbfuQ",
+        authDomain: "pt-mbu.firebaseapp.com",
+        projectId: "pt-mbu",
+        databaseURL: "https://pt-mbu-default-rtdb.asia-southeast1.firebasedatabase.app/",
+        storageBucket: "pt-mbu.firebasestorage.app"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // 2. MASTER DATA KARYAWAN (Sesuaikan Role & Lembur di sini)
+    const masterKaryawan = {
+        "Yefry": { role: "Staff", bisaLembur: true },
+        "Hasan": { role: "Sopir", bisaLembur: false },
+        "Andi":  { role: "Sopir", bisaLembur: false }
+    };
+
+    const inputTgl = document.getElementById('pilih-tanggal');
+    const inputBulan = document.getElementById('pilih-bulan');
+    
+    // Set Default Tanggal & Bulan Saat Ini
+    inputTgl.value = new Date().toISOString().split('T')[0];
+    if(inputBulan) inputBulan.value = new Date().toISOString().slice(0, 7);
+
+    // 3. FUNGSI HITUNG DURASI & LEMBUR
+    function hitungDurasi(jamM, jamP, bisaLembur) {
+        if(!jamM || !jamP) return { total: "-", lembur: "-" };
+        const [hM, mM] = jamM.split(':').map(Number);
+        const [hP, mP] = jamP.split(':').map(Number);
+        const totalMenit = (hP * 60 + mP) - (hM * 60 + mM);
+        const totalJam = totalMenit / 60;
+        let jamLembur = (bisaLembur && totalJam > 8) ? totalJam - 8 : 0;
+        return { 
+            total: totalJam.toFixed(1) + " j", 
+            lembur: jamLembur > 0 ? jamLembur.toFixed(1) + " j" : "-" 
+        };
+    }
+
+    // 4. DOWNLOAD PDF HARIAN
+    window.downloadPDF = function() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const tglInput = inputTgl.value;
+        const tglIndo = tglInput.split('-').reverse().join('-');
+        const daftarHari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+        const hariIni = daftarHari[new Date(tglInput).getDay()];
+
+        // Header Biru Ramping
+        doc.setFillColor(2, 132, 199); doc.rect(0, 0, 210, 25, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(16); doc.text("LAPORAN ABSENSI HARIAN PT. MBU", 12, 12);
+        doc.setFontSize(10); doc.text(`${hariIni}, ${tglIndo}`, 12, 19);
+
+        const rows = [];
+        document.querySelectorAll("#isi-tabel tr").forEach(tr => {
+            const cells = tr.querySelectorAll("td");
+            if (cells.length > 1) {
+                rows.push([cells[0].innerText, cells[1].innerText, cells[2].innerText, cells[3].innerText, cells[4].innerText, cells[5].innerText, cells[6].innerText]);
+            }
+        });
+
+        doc.autoTable({
+            head: [['Nama', 'Role', 'Masuk', 'Pulang', 'Total', 'Lembur', 'Lokasi']],
+            body: rows, startY: 30, headStyles: { fillRGB: [14, 165, 233] }, styles: { fontSize: 8 }
+        });
+        doc.save(`Laporan_Harian_MBU_${tglIndo}.pdf`);
+    }
+
+    // 5. GENERATE BULANAN & RESET DATA (Sapu Jagat)
+    window.generateBulanan = async function() {
+        const bulanSelected = inputBulan.value;
+        if(!confirm(`Tarik laporan bulan ${bulanSelected}?\nData akan dihapus setelah download untuk hemat memori.`)) return;
+
+        const dbRef = ref(db, `pt_mbu/absensi`);
+        onValue(dbRef, async (snapshot) => {
+            if (!snapshot.exists()) return alert("Data tidak ditemukan!");
+            
+            const allData = snapshot.val();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            let rows = [];
+
+            Object.keys(allData).forEach(tgl => {
+                if (tgl.startsWith(bulanSelected)) {
+                    const dataTgl = allData[tgl];
+                    Object.keys(dataTgl).forEach(nama => {
+                        const d = dataTgl[nama], m = d.MASUK || {}, p = d.PULANG || {};
+                        const profil = masterKaryawan[nama] || { role: "Sopir", bisaLembur: false };
+                        const h = hitungDurasi(m.jam, p.jam, profil.bisaLembur);
+                        rows.push([tgl, nama, profil.role, m.jam || '-', p.jam || '-', h.total, h.lembur]);
+                    });
+                }
+            });
+
+            if (rows.length === 0) return alert("Data bulan ini kosong!");
+            rows.sort((a, b) => a[0].localeCompare(b[0]));
+
+            doc.setFillColor(5, 150, 105); doc.rect(0, 0, 210, 25, 'F'); // Hijau untuk bulanan
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(16); doc.text("REKAPITULASI BULANAN PT. MBU", 12, 12);
+            doc.setFontSize(10); doc.text(`Periode: ${bulanSelected}`, 12, 19);
+
+            doc.autoTable({
+                head: [['Tanggal', 'Nama', 'Role', 'Masuk', 'Pulang', 'Total', 'Lembur']],
+                body: rows, startY: 30, headStyles: { fillRGB: [5, 150, 105] }, styles: { fontSize: 7 }
+            });
+
+            doc.save(`Laporan_Bulanan_MBU_${bulanSelected}.pdf`);
+
+            setTimeout(async () => {
+                if(confirm("Laporan sudah aman? Klik OK untuk menghapus data di Firebase.")) {
+                    for (const tgl in allData) {
+                        if (tgl.startsWith(bulanSelected)) await remove(ref(db, `pt_mbu/absensi/${tgl}`));
+                    }
+                    alert("Database Bersih!"); location.reload();
+                }
+            }, 2000);
+        }, { onlyOnce: true });
+    };
+
+    // 6. MUAT DATA HARIAN KE TABEL
+    function muatData() {
+        const tgl = inputTgl.value;
+        document.getElementById('label-tgl').innerText = "Update Terakhir: " + tgl;
+        onValue(ref(db, `pt_mbu/absensi/${tgl}`), (snapshot) => {
+            const container = document.getElementById('isi-tabel');
+            container.innerHTML = "";
+            if (snapshot.exists()) {
+                const allData = snapshot.val();
+                Object.keys(allData).forEach(nama => {
+                    const d = allData[nama], m = d.MASUK || {}, p = d.PULANG || {};
+                    const profil = masterKaryawan[nama] || { role: "Staff", bisaLembur: true };
+                    const hasil = hitungDurasi(m.jam, p.jam, profil.bisaLembur);
+                    container.innerHTML += `
+                        <tr>
+                            <td><b>${nama}</b></td>
+                            <td>${profil.role}</td>
+                            <td style="color:#16a34a; font-weight:bold;">${m.jam || '--:--'}</td>
+                            <td style="color:#dc2626; font-weight:bold;">${p.jam || '--:--'}</td>
+                            <td>${hasil.total}</td>
+                            <td class="lembur">${hasil.lembur}</td>
+                            <td><small>${m.lokasi || '-'}</small></td>
+                            <td>${m.foto ? `<img src="${m.foto}" class="foto-mini" onclick="window.open(this.src)">` : '-'}</td>
+                        </tr>`;
+                });
+            } else {
+                container.innerHTML = "<tr><td colspan='8' style='text-align:center;'>Tidak ada data absen.</td></tr>";
+            }
+        });
+    }
+
+    inputTgl.onchange = muatData;
+    muatData();
+</script>
